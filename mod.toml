@@ -1,11 +1,10 @@
-# Config file for an example Majora's Mask: Recompiled mod.
+# Config file for Bugs Life mod for Majora's Mask: Recompiled
 
 # Fields that end up in the mod's manifest.
 [manifest]
 
 # Unique ID of this mod. Pick something long enough that it'll never be the same as any other mod.
-# The name displayed in the mod management menu is separate from this so this doesn't need to be human readable.
-id = "mm_recomp_mod_template"
+id = "mm_iron_goron"
 
 # Version of this mod.
 version = "1.0.0"
@@ -14,14 +13,12 @@ version = "1.0.0"
 display_name = "Iron Goron"
 
 # The description that will show up when this mod is displayed in the mod menu. This should be human readable.
-description =  """
-This mod allows Goron to enter bodies of water without drowning. This means you can enter Pirates fortress without Zora Mask and can skip changing water direction in Great Bay Temple among other fun things. 
+description = """
+This Mod allows the use of Goron underwater. You can also punch trees to shake them and 
+break the boards in front of the pirates fortress."""
 
-For more details, see https://github.com/Zelda64Recomp/MMRecompModTemplate."""
-
-# A short description that will show up in this mod's entry in the mod list. This should be human readable and kept short
-# to prevent it from being cut off due to the limited space.
-short_description = "Always perform a quickspin when swinging your sword."
+# A short description that will show up in this mod's entry in the mod list.
+short_description = "Go Underwater As Goron."
 
 # Authors of this mod.
 authors = [ "PixelShake92" ]
@@ -29,27 +26,17 @@ authors = [ "PixelShake92" ]
 # ID of the target recomp game.
 game_id = "mm"
 
-# Minimum version of the target recomp (e.g. Zelda 64: Recompiled) that this mod can run on.
+# Minimum version of the target recomp that this mod can run on.
 minimum_recomp_version = "1.2.2"
 
-# Dependency mods. Each entry is the mod's ID and then an optional minimum version of the dependency mod.
-dependencies = [
-# Example dependency:
-#    "Iron Goron:1.0.0"
-]
+# Dependency mods.
+dependencies = []
 
-# Optional dependency mods. This has the same format as `dependencies`, but the game will still start if dependencies in this
-# list aren't present. You can query the presence of a given dependency by using `recomp_is_dependency_met` in recomputils.h.
-# Calling a function imported from an optional dependency that isn't present will trigger an error.
-optional_dependencies = [
-
-]
+# Optional dependency mods.
+optional_dependencies = []
 
 # Native libraries (e.g. DLLs) and the functions they export.
-native_libraries = [
-# Example native library:
-#    { name = "my_native_library", funcs = ["my_native_library_function"] }
-]
+native_libraries = []
 
 # Inputs to the mod tool.
 [inputs]
@@ -58,7 +45,7 @@ native_libraries = [
 elf_path = "build/mod.elf"
 
 # Output mod filename.
-mod_filename = "Iron_Goron"
+mod_filename = "mm_iron_goron"
 
 # Reference symbol files.
 func_reference_syms_file = "Zelda64RecompSyms/mm.us.rev1.syms.toml"
