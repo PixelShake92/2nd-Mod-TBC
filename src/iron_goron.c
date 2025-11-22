@@ -1,5 +1,5 @@
 /* 
- * Iron Goron Mod - With Transformations and Zora Fix
+ * Iron Goron Mod - With Transformations, Without Weird B
  */
 
 #include "modding.h"
@@ -13,15 +13,6 @@
 extern void func_80834104(PlayState* play, Player* this);
 extern s32 func_8082DA90(PlayState* play);
 extern void PlayerAnimation_Change(PlayState* play, SkelAnime* skelAnime, PlayerAnimationHeader* anim, f32 playSpeed, f32 startFrame, f32 endFrame, u8 mode, f32 morphFrames);
-extern void func_8083B8D0(PlayState* play, Player* this);
-extern void func_80123140(PlayState* play, Player* this);
-extern void func_8082DE50(PlayState* play, Player* this);
-extern void func_8083B850(PlayState* play, Player* this);
-extern void func_8083B798(PlayState* play, Player* this);
-extern void func_8083B3B4(PlayState* play, Player* this, Input* input);
-extern void Player_SetAction(PlayState* play, Player* this, PlayerActionFunc actionFunc, s32 arg3);
-extern void Player_Anim_PlayOnceMorph(PlayState* play, Player* this, PlayerAnimationHeader* anim);
-extern void Player_Anim_PlayLoopAdjusted(PlayState* play, Player* this, PlayerAnimationHeader* anim);
 extern PlayerItemAction Player_ItemToItemAction(Player* this, ItemId item);
 extern PlayerMeleeWeapon Player_MeleeWeaponFromIA(PlayerItemAction itemAction);
 extern PlayerExplosive Player_ExplosiveFromIA(Player* this, PlayerItemAction itemAction);
@@ -33,6 +24,10 @@ extern void Player_DetachHeldActor(PlayState* play, Player* this);
 extern void Player_InitItemActionWithAnim(PlayState* play, Player* this, PlayerItemAction itemAction);
 extern void func_8082E1F0(Player* this, u16 sfxId);
 
+// External water speed globals
+extern f32 sWaterSpeedFactor;
+extern f32 sInvWaterSpeedFactor;
+
 // Structs and arrays
 typedef struct {
     ItemId itemId;
@@ -41,23 +36,12 @@ typedef struct {
 extern PlayerExplosiveInfo sPlayerExplosiveInfo[];
 extern s8 sPlayerItemChangeTypes[][21];
 
-// Animation declarations
-extern PlayerAnimationHeader gPlayerAnim_pz_fishswim;
-extern PlayerAnimationHeader gPlayerAnim_link_swimer_wait2swim_wait;
-extern PlayerAnimationHeader gPlayerAnim_link_swimer_land2swim_wait;
-
-// Action functions
-extern void Player_Action_27(Player* this, PlayState* play);
-extern void Player_Action_28(Player* this, PlayState* play);
-extern void Player_Action_54(Player* this, PlayState* play);
-extern void Player_Action_59(Player* this, PlayState* play);
-extern void Player_Action_96(Player* this, PlayState* play);
-
 // Global vars
 extern u8 sPlayerUseHeldItem;
 extern u8 sPlayerHeldItemButtonIsHeldDown;
 
 #define ANIMMODE_ONCE 2
+#define PLAYER_STATE1_IN_WATER 0x00000001
 #define PLAYER_STATE1_SWIMMING 0x08000000
 #define PLAYER_BOOTS_ZORA_UNDERWATER 3
 #define PLAYER_IA_MINUS1 -1
@@ -65,7 +49,24 @@ extern u8 sPlayerHeldItemButtonIsHeldDown;
 #define PLAYER_UNKAA5_2 2
 #define PLAYER_UNKAA5_5 5
 
-// Patch: Player_UseItem - Allow transformation masks underwater
+// Static variables for water speed fix
+static Player* sGoronSpeedPlayer = NULL;
+static PlayState* sGoronSpeedPlay = NULL;
+
+// Patch: func_8082FD0C - allow Goron mask on C buttons in water
+RECOMP_PATCH s32 func_8082FD0C(Player* this, s32 item) {
+    if (item == ITEM_MASK_GORON) {
+        return true;
+    }
+    
+    if (this->stateFlags1 & (PLAYER_STATE1_IN_WATER | PLAYER_STATE1_SWIMMING)) {
+        return false;
+    }
+    
+    return true;
+}
+
+// Patch: Player_UseItem - Allow transformation masks underwater (ONLY THIS PATCH, NOT func_8083B930)
 RECOMP_PATCH void Player_UseItem(PlayState* play, Player* this, ItemId item) {
     PlayerItemAction itemAction = Player_ItemToItemAction(this, item);
 
@@ -75,7 +76,7 @@ RECOMP_PATCH void Player_UseItem(PlayState* play, Player* this, ItemId item) {
          ((this->itemAction <= PLAYER_IA_MINUS1) &&
           ((Player_MeleeWeaponFromIA(itemAction) != PLAYER_MELEEWEAPON_NONE) || (itemAction == PLAYER_IA_NONE)))) &&
         ((itemAction == PLAYER_IA_NONE) || !(this->stateFlags1 & PLAYER_STATE1_8000000) ||
-         (itemAction >= PLAYER_IA_MASK_TRANSFORMATION_MIN && itemAction <= PLAYER_IA_MASK_MAX) ||  // ALL TRANSFORMATION MASKS!
+         (itemAction >= PLAYER_IA_MASK_TRANSFORMATION_MIN && itemAction <= PLAYER_IA_MASK_MAX) ||
          ((this->currentBoots >= PLAYER_BOOTS_ZORA_UNDERWATER) && (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)))) {
         s32 var_v1 = ((itemAction >= PLAYER_IA_MASK_MIN) && (itemAction <= PLAYER_IA_MASK_MAX) &&
                       ((this->transformation != PLAYER_FORM_HUMAN) || (itemAction >= PLAYER_IA_MASK_GIANT)));
@@ -174,74 +175,22 @@ RECOMP_PATCH void Player_UseItem(PlayState* play, Player* this, ItemId item) {
     }
 }
 
-// Patch: func_8083B930 - Handle Goron specially
-RECOMP_PATCH void func_8083B930(PlayState* play, Player* this) {
-    // GORON: Play splash, set underwater state flags, but no swimming animation
-    if (this->transformation == PLAYER_FORM_GORON) {
-        if (!(this->stateFlags1 & PLAYER_STATE1_8000000) || (this->actor.depthInWater < this->ageProperties->unk_2C)) {
-            func_8083B8D0(play, this);
-        }
-        
-        this->stateFlags1 |= PLAYER_STATE1_8000000;
-        this->stateFlags2 |= PLAYER_STATE2_400;
-        this->stateFlags1 &= ~(PLAYER_STATE1_40000 | PLAYER_STATE1_80000 | PLAYER_STATE1_SWIMMING);
-        
-        this->unk_AEC = 0.0f;
-        this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
-        func_80123140(play, this);
-        return;
-    }
-
-    // ZORA FIX: Allow Zora to enter swimming logic even when on ground
-    // Fix: Add special case for Zora
-    if ((this->currentBoots < PLAYER_BOOTS_ZORA_UNDERWATER) || 
-        !(this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) ||
-        (this->transformation == PLAYER_FORM_ZORA) ||  // <<< ZORA FIX: Always allow swimming logic for Zora
-        (Player_Action_96 == this->actionFunc)) {
-        func_8082DE50(play, this);
-
-        if (Player_Action_28 == this->actionFunc) {
-            func_8083B850(play, this);
-            this->stateFlags3 |= PLAYER_STATE3_8000;
-        } else if ((this->transformation == PLAYER_FORM_ZORA) && (Player_Action_27 == this->actionFunc)) {
-            func_8083B850(play, this);
-            this->stateFlags3 |= PLAYER_STATE3_8000;
-            Player_Anim_PlayLoopAdjusted(play, this, &gPlayerAnim_pz_fishswim);
-        } else if ((this->currentBoots < PLAYER_BOOTS_ZORA_UNDERWATER) && (this->stateFlags2 & PLAYER_STATE2_400)) {
-            this->stateFlags2 &= ~PLAYER_STATE2_400;
-            func_8083B3B4(play, this, NULL);
-            this->av1.actionVar1 = 1;
-        } else if (Player_Action_27 == this->actionFunc) {
-            Player_SetAction(play, this, Player_Action_59, 0);
-            func_8083B798(play, this);
-        } else {
-            Player_SetAction(play, this, Player_Action_54, 1);
-            Player_Anim_PlayOnceMorph(play, this,
-                                      (this->actor.bgCheckFlags & BGCHECKFLAG_GROUND)
-                                          ? &gPlayerAnim_link_swimer_wait2swim_wait
-                                          : &gPlayerAnim_link_swimer_land2swim_wait);
-        }
-    }
-    if (!(this->stateFlags1 & PLAYER_STATE1_8000000) || (this->actor.depthInWater < this->ageProperties->unk_2C)) {
-        func_8083B8D0(play, this);
-    }
-
-    this->stateFlags1 |= PLAYER_STATE1_8000000;
-    this->stateFlags2 |= PLAYER_STATE2_400;
-    this->stateFlags1 &= ~(PLAYER_STATE1_40000 | PLAYER_STATE1_80000);
-
-    this->unk_AEC = 0.0f;
-    func_80123140(play, this);
-}
-
-// Hook: Enable transformation masks and buttons underwater
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Underwater_Hook(Player* this, PlayState* play) {
+// Hook: Player_UpdateCommon ENTRY - Like old code but with water speed fix
+RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, PlayState* play, Input* input) {
+    sGoronSpeedPlayer = this;
+    sGoronSpeedPlay = play;
+    
     InterfaceContext* interfaceCtx = &play->interfaceCtx;
     
-    // Enable transformation mask buttons underwater for ALL forms
-    if (this->stateFlags1 & PLAYER_STATE1_8000000) {
-        s32 i;
-        for (i = EQUIP_SLOT_C_LEFT; i <= EQUIP_SLOT_C_RIGHT; i++) {
+    // Water speed fix
+    if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
+        sWaterSpeedFactor = 1.0f;
+        sInvWaterSpeedFactor = 1.0f;
+    }
+    
+    // Enable C buttons for ALL forms underwater
+    if (this->stateFlags1 & PLAYER_STATE1_SWIMMING) {
+        for (s32 i = EQUIP_SLOT_C_LEFT; i <= EQUIP_SLOT_C_RIGHT; i++) {
             ItemId item = GET_CUR_FORM_BTN_ITEM(i);
             if (item >= ITEM_MASK_DEKU && item <= ITEM_MASK_FIERCE_DEITY) {
                 gSaveContext.buttonStatus[i] = BTN_ENABLED;
@@ -257,20 +206,49 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Underwater_Hook(Play
         }
     }
     
-    // Special Goron underwater handling
+    // Goron underwater - just like old code
     if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
         this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
         
         gSaveContext.buttonStatus[EQUIP_SLOT_B] = BTN_ENABLED;
-        interfaceCtx->bAlpha = 255;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_LEFT] = BTN_ENABLED;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_DOWN] = BTN_ENABLED;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_RIGHT] = BTN_ENABLED;
         
         this->underwaterTimer = 0;
         this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
     }
 }
 
+// Hook: Player_UpdateCommon RETURN - Water speed fix
+RECOMP_HOOK_RETURN("Player_UpdateCommon") void Player_UpdateCommon_Return(void) {
+    if (sGoronSpeedPlayer != NULL && sGoronSpeedPlay != NULL) {
+        // Water speed fix
+        if (sGoronSpeedPlayer->transformation == PLAYER_FORM_GORON && sGoronSpeedPlayer->actor.depthInWater > 0.0f) {
+            sWaterSpeedFactor = 1.0f;
+            sInvWaterSpeedFactor = 1.0f;
+        }
+        
+        sGoronSpeedPlayer = NULL;
+        sGoronSpeedPlay = NULL;
+    }
+}
+
+// Hook: Player_Init
+RECOMP_HOOK("Player_Init") void Player_Init_Goron_Hook(Actor* thisx, PlayState* play) {
+    Player* this = (Player*)thisx;
+    
+    if (this->transformation == PLAYER_FORM_GORON) {
+        this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
+        this->underwaterTimer = 0;
+        if (this->actor.depthInWater > 0.0f) {
+            this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
+        }
+    }
+}
+
 // Hook: Register melee weapon collision
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_RegisterPunch(Player* this, PlayState* play) {
+RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_RegisterPunch(Player* this, PlayState* play, Input* input) {
     if (this->meleeWeaponState >= PLAYER_MELEE_WEAPON_STATE_1) {
         if ((this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) ||
             this->actor.depthInWater == 0.0f) {
@@ -282,7 +260,7 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_RegisterPunch(Player
 }
 
 // Hook: Break nearby objects when Goron punches
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_BreakObjects(Player* this, PlayState* play) {
+RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_BreakObjects(Player* this, PlayState* play, Input* input) {
     static u8 punchTriggered = 0;
     
     if (this->transformation != PLAYER_FORM_GORON || 
@@ -377,4 +355,13 @@ RECOMP_PATCH s32 func_80837730(PlayState* play, Player* this, f32 arg2, s32 scal
         }
     }
     return false;
+}
+
+// Patch: Fix Deku mask handling
+RECOMP_PATCH void func_808345C8(void) {
+    if (INV_CONTENT(ITEM_MASK_DEKU) == ITEM_MASK_DEKU && 
+        gSaveContext.save.saveInfo.playerData.health == 0) {
+        gSaveContext.save.playerForm = PLAYER_FORM_HUMAN;
+        gSaveContext.save.equippedMask = PLAYER_MASK_NONE;
+    }
 }
