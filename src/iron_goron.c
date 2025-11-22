@@ -1,5 +1,5 @@
 /* 
- * Iron Goron Mod - Without Player_UseItem Patch
+ * Iron Goron Mod - Final Working Version
  */
 
 #include "modding.h"
@@ -23,13 +23,12 @@ extern f32 sInvWaterSpeedFactor;
 #define PLAYER_STATE1_SWIMMING 0x08000000
 #define PLAYER_BOOTS_ZORA_UNDERWATER 3
 
-// Static variables for water speed fix
+// Static variables
 static Player* sGoronSpeedPlayer = NULL;
 static PlayState* sGoronSpeedPlay = NULL;
 
-// Patch: func_8082FD0C - Allow ALL transformation masks on C buttons underwater
+// Patch: func_8082FD0C - Allow transformation masks on C buttons underwater
 RECOMP_PATCH s32 func_8082FD0C(Player* this, s32 item) {
-    // Allow all transformation masks underwater
     if (item >= ITEM_MASK_DEKU && item <= ITEM_MASK_FIERCE_DEITY) {
         return true;
     }
@@ -41,7 +40,7 @@ RECOMP_PATCH s32 func_8082FD0C(Player* this, s32 item) {
     return true;
 }
 
-// Hook: Player_UpdateCommon ENTRY - Like old code but with water speed fix
+// Hook: Player_UpdateCommon ENTRY
 RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, PlayState* play, Input* input) {
     sGoronSpeedPlayer = this;
     sGoronSpeedPlay = play;
@@ -54,7 +53,7 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, 
         sInvWaterSpeedFactor = 1.0f;
     }
     
-    // Enable C buttons for ALL forms underwater
+    // Enable C buttons for transformation masks underwater
     if (this->stateFlags1 & PLAYER_STATE1_SWIMMING) {
         for (s32 i = EQUIP_SLOT_C_LEFT; i <= EQUIP_SLOT_C_RIGHT; i++) {
             ItemId item = GET_CUR_FORM_BTN_ITEM(i);
@@ -72,7 +71,7 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, 
         }
     }
     
-    // Goron underwater - just like old code
+    // Goron underwater
     if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
         this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
         
@@ -86,10 +85,9 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, 
     }
 }
 
-// Hook: Player_UpdateCommon RETURN - Water speed fix
+// Hook: Player_UpdateCommon RETURN
 RECOMP_HOOK_RETURN("Player_UpdateCommon") void Player_UpdateCommon_Return(void) {
     if (sGoronSpeedPlayer != NULL && sGoronSpeedPlay != NULL) {
-        // Water speed fix
         if (sGoronSpeedPlayer->transformation == PLAYER_FORM_GORON && sGoronSpeedPlayer->actor.depthInWater > 0.0f) {
             sWaterSpeedFactor = 1.0f;
             sInvWaterSpeedFactor = 1.0f;
