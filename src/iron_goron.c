@@ -1,5 +1,5 @@
 /* 
- * Iron Goron Mod - Final Working Version
+ * Iron Goron Mod - Proper Speed Management
  */
 
 #include "modding.h"
@@ -26,6 +26,8 @@ extern f32 sInvWaterSpeedFactor;
 // Static variables
 static Player* sGoronSpeedPlayer = NULL;
 static PlayState* sGoronSpeedPlay = NULL;
+static u8 sPunchTriggered = 0;
+static u8 sWasGoronUnderwater = 0;
 
 // Patch: func_8082FD0C - Allow transformation masks on C buttons underwater
 RECOMP_PATCH s32 func_8082FD0C(Player* this, s32 item) {
@@ -40,20 +42,75 @@ RECOMP_PATCH s32 func_8082FD0C(Player* this, s32 item) {
     return true;
 }
 
-// Hook: Player_UpdateCommon ENTRY
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, PlayState* play, Input* input) {
+// Hook: func_80123140 (Player_SetBootData) - Modify physics at the source
+RECOMP_HOOK("func_80123140") void Player_SetBootData_Goron(PlayState* play, Player* player) {
+    // If Goron underwater, ensure correct boot state BEFORE physics are set
+    if (player->transformation == PLAYER_FORM_GORON && player->actor.depthInWater > 0.0f) {
+        player->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
+    }
+}
+
+// Hook: Player_UpdateCommon
+RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Combined(Player* this, PlayState* play, Input* input) {
     sGoronSpeedPlayer = this;
     sGoronSpeedPlay = play;
     
     InterfaceContext* interfaceCtx = &play->interfaceCtx;
     
-    // Water speed fix
-    if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
-        sWaterSpeedFactor = 1.0f;
-        sInvWaterSpeedFactor = 1.0f;
+    // Check if Goron is currently underwater
+    u8 isGoronUnderwater = (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f);
+    
+    // DETECT STATE TRANSITIONS - Reset speed immediately
+    if (sWasGoronUnderwater && !isGoronUnderwater) {
+        // Goron just LEFT water or transformed - FORCE RESET
+        this->currentBoots = PLAYER_BOOTS_HYLIAN;
+        sWaterSpeedFactor = 0.5f;
+        sInvWaterSpeedFactor = 2.0f;
+        
+        // Nuclear option: zero ALL speed values
+        this->speedXZ = 0.0f;
+        this->actor.speed = 0.0f;
     }
     
-    // Enable C buttons for transformation masks underwater
+    // GORON UNDERWATER FIXES
+    if (isGoronUnderwater) {
+        // FORCE ground-based underwater physics
+        this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
+        this->underwaterTimer = 0;
+        
+        // AGGRESSIVELY clear ALL swimming flags
+        this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
+        this->stateFlags1 &= ~PLAYER_STATE1_IN_WATER;
+        this->stateFlags2 &= ~PLAYER_STATE2_400;
+        
+        // Water speed fix
+        sWaterSpeedFactor = 1.0f;
+        sInvWaterSpeedFactor = 1.0f;
+        
+        // ONLY boost if currently moving AND boots are set correctly
+        if (this->currentBoots == PLAYER_BOOTS_ZORA_UNDERWATER && 
+            (play->state.input[0].rel.stick_x || play->state.input[0].rel.stick_y)) {
+            if (this->speedXZ < 2.0f) {
+                this->speedXZ = 2.5f;
+            }
+        }
+        
+        // Enable all buttons
+        gSaveContext.buttonStatus[EQUIP_SLOT_B] = BTN_ENABLED;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_LEFT] = BTN_ENABLED;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_DOWN] = BTN_ENABLED;
+        gSaveContext.buttonStatus[EQUIP_SLOT_C_RIGHT] = BTN_ENABLED;
+        
+        interfaceCtx->bAlpha = 255;
+        interfaceCtx->cLeftAlpha = 255;
+        interfaceCtx->cDownAlpha = 255;
+        interfaceCtx->cRightAlpha = 255;
+    }
+    
+    // Update tracking variable
+    sWasGoronUnderwater = isGoronUnderwater;
+    
+    // Enable C buttons for transformation masks underwater (other forms)
     if (this->stateFlags1 & PLAYER_STATE1_SWIMMING) {
         for (s32 i = EQUIP_SLOT_C_LEFT; i <= EQUIP_SLOT_C_RIGHT; i++) {
             ItemId item = GET_CUR_FORM_BTN_ITEM(i);
@@ -71,48 +128,7 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_Entry(Player* this, 
         }
     }
     
-    // Goron underwater
-    if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
-        this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
-        
-        gSaveContext.buttonStatus[EQUIP_SLOT_B] = BTN_ENABLED;
-        gSaveContext.buttonStatus[EQUIP_SLOT_C_LEFT] = BTN_ENABLED;
-        gSaveContext.buttonStatus[EQUIP_SLOT_C_DOWN] = BTN_ENABLED;
-        gSaveContext.buttonStatus[EQUIP_SLOT_C_RIGHT] = BTN_ENABLED;
-        
-        this->underwaterTimer = 0;
-        this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
-    }
-}
-
-// Hook: Player_UpdateCommon RETURN
-RECOMP_HOOK_RETURN("Player_UpdateCommon") void Player_UpdateCommon_Return(void) {
-    if (sGoronSpeedPlayer != NULL && sGoronSpeedPlay != NULL) {
-        if (sGoronSpeedPlayer->transformation == PLAYER_FORM_GORON && sGoronSpeedPlayer->actor.depthInWater > 0.0f) {
-            sWaterSpeedFactor = 1.0f;
-            sInvWaterSpeedFactor = 1.0f;
-        }
-        
-        sGoronSpeedPlayer = NULL;
-        sGoronSpeedPlay = NULL;
-    }
-}
-
-// Hook: Player_Init
-RECOMP_HOOK("Player_Init") void Player_Init_Goron_Hook(Actor* thisx, PlayState* play) {
-    Player* this = (Player*)thisx;
-    
-    if (this->transformation == PLAYER_FORM_GORON) {
-        this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
-        this->underwaterTimer = 0;
-        if (this->actor.depthInWater > 0.0f) {
-            this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
-        }
-    }
-}
-
-// Hook: Register melee weapon collision
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_RegisterPunch(Player* this, PlayState* play, Input* input) {
+    // Register melee weapon collision
     if (this->meleeWeaponState >= PLAYER_MELEE_WEAPON_STATE_1) {
         if ((this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) ||
             this->actor.depthInWater == 0.0f) {
@@ -121,57 +137,99 @@ RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_RegisterPunch(Player
             CollisionCheck_SetAT(play, &play->colChkCtx, &this->meleeWeaponQuads[1].base);
         }
     }
-}
-
-// Hook: Break nearby objects when Goron punches
-RECOMP_HOOK("Player_UpdateCommon") void Player_UpdateCommon_BreakObjects(Player* this, PlayState* play, Input* input) {
-    static u8 punchTriggered = 0;
     
+    // Break nearby objects when Goron punches
     if (this->transformation != PLAYER_FORM_GORON || 
         this->meleeWeaponState < PLAYER_MELEE_WEAPON_STATE_1) {
-        punchTriggered = 0;
-        return;
-    }
-    
-    if (punchTriggered) {
-        return;
-    }
-    punchTriggered = 1;
-    
-    Actor* actor = play->actorCtx.actorLists[ACTORCAT_BG].first;
-    while (actor != NULL) {
-        f32 distSq = Math3D_Vec3fDistSq(&this->actor.world.pos, &actor->world.pos);
+        sPunchTriggered = 0;
+    } else if (!sPunchTriggered) {
+        sPunchTriggered = 1;
         
-        if (actor->id == ACTOR_OBJ_TARU) {
-            ObjTaru* taru = (ObjTaru*)actor;
-            if (OBJ_TARU_GET_80(&taru->dyna.actor) && 
-                distSq < SQ(150.0f) && 
-                this->actor.depthInWater > 0.0f) {
-                taru->dyna.actor.home.rot.z = 1;
+        Actor* actor = play->actorCtx.actorLists[ACTORCAT_BG].first;
+        while (actor != NULL) {
+            f32 distSq = Math3D_Vec3fDistSq(&this->actor.world.pos, &actor->world.pos);
+            
+            if (actor->id == ACTOR_OBJ_TARU) {
+                ObjTaru* taru = (ObjTaru*)actor;
+                if (OBJ_TARU_GET_80(&taru->dyna.actor) && 
+                    distSq < SQ(150.0f) && 
+                    this->actor.depthInWater > 0.0f) {
+                    taru->dyna.actor.home.rot.z = 1;
+                }
+            } else if (actor->id == ACTOR_OBJ_YASI && distSq < SQ(150.0f)) {
+                actor->home.rot.z = 1;
+            } else if (actor->id == ACTOR_OBJ_TREE && distSq < SQ(150.0f)) {
+                actor->home.rot.y = 1;
             }
-        } else if (actor->id == ACTOR_OBJ_YASI && distSq < SQ(150.0f)) {
-            actor->home.rot.z = 1;
-        } else if (actor->id == ACTOR_OBJ_TREE && distSq < SQ(150.0f)) {
-            actor->home.rot.y = 1;
+            
+            actor = actor->next;
         }
         
-        actor = actor->next;
+        actor = play->actorCtx.actorLists[ACTORCAT_PROP].first;
+        while (actor != NULL) {
+            f32 distSq = Math3D_Vec3fDistSq(&this->actor.world.pos, &actor->world.pos);
+            
+            if (actor->id == ACTOR_OBJ_YASI && distSq < SQ(50.0f)) {
+                actor->home.rot.z = 1;
+            } else if ((actor->id == ACTOR_EN_WOOD02 || 
+                        actor->id == ACTOR_EN_SNOWWD || 
+                        actor->id == ACTOR_OBJ_TREE) && 
+                       distSq < SQ(50.0f)) {
+                actor->home.rot.y = 1;
+            }
+            
+            actor = actor->next;
+        }
     }
-    
-    actor = play->actorCtx.actorLists[ACTORCAT_PROP].first;
-    while (actor != NULL) {
-        f32 distSq = Math3D_Vec3fDistSq(&this->actor.world.pos, &actor->world.pos);
-        
-        if (actor->id == ACTOR_OBJ_YASI && distSq < SQ(50.0f)) {
-            actor->home.rot.z = 1;
-        } else if ((actor->id == ACTOR_EN_WOOD02 || 
-                    actor->id == ACTOR_EN_SNOWWD || 
-                    actor->id == ACTOR_OBJ_TREE) && 
-                   distSq < SQ(50.0f)) {
-            actor->home.rot.y = 1;
+}
+
+// Hook: Player_UpdateCommon RETURN
+RECOMP_HOOK_RETURN("Player_UpdateCommon") void Player_UpdateCommon_Return(void) {
+    if (sGoronSpeedPlayer != NULL && sGoronSpeedPlay != NULL) {
+        // ONLY fix Goron state if CURRENTLY underwater
+        if (sGoronSpeedPlayer->transformation == PLAYER_FORM_GORON && sGoronSpeedPlayer->actor.depthInWater > 0.0f) {
+            sWaterSpeedFactor = 1.0f;
+            sInvWaterSpeedFactor = 1.0f;
+            
+            // Clear swimming flags AGAIN
+            sGoronSpeedPlayer->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
+            sGoronSpeedPlayer->stateFlags1 &= ~PLAYER_STATE1_IN_WATER;
+            sGoronSpeedPlayer->stateFlags2 &= ~PLAYER_STATE2_400;
+            sGoronSpeedPlayer->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
         }
         
-        actor = actor->next;
+        sGoronSpeedPlayer = NULL;
+        sGoronSpeedPlay = NULL;
+    }
+}
+
+// Hook: Player_Init - Fix state on load/transformation  
+RECOMP_HOOK("Player_Init") void Player_Init_Goron_Hook(Actor* thisx, PlayState* play) {
+    Player* this = (Player*)thisx;
+    
+    // ALWAYS reset all speeds on init
+    this->speedXZ = 0.0f;
+    this->actor.speed = 0.0f;
+    
+    if (this->transformation == PLAYER_FORM_GORON && this->actor.depthInWater > 0.0f) {
+        // AGGRESSIVELY clear swimming state on init
+        this->stateFlags1 &= ~PLAYER_STATE1_SWIMMING;
+        this->stateFlags1 &= ~PLAYER_STATE1_IN_WATER;
+        this->stateFlags2 &= ~PLAYER_STATE2_400;
+        this->underwaterTimer = 0;
+        this->currentBoots = PLAYER_BOOTS_ZORA_UNDERWATER;
+        
+        sWasGoronUnderwater = 1;
+    } else {
+        sWasGoronUnderwater = 0;
+        
+        // Ensure normal boot state
+        if (this->currentBoots == PLAYER_BOOTS_ZORA_UNDERWATER && this->transformation != PLAYER_FORM_ZORA) {
+            this->currentBoots = PLAYER_BOOTS_HYLIAN;
+        }
+        
+        sWaterSpeedFactor = 0.5f;
+        sInvWaterSpeedFactor = 2.0f;
     }
 }
 
